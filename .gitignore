@@ -1,36 +1,18 @@
-# Аудио, видео и текстовые файлы в корне проекта
-/*.mp3
-/*.mp4
-/*.txt
-
-# Изображения в корне
-/*.png
-/*.jpg
-/*.jpeg
-
-# Но не игнорируем requirements.txt
-!requirements.txt
-
-# Виртуальное окружение Python
 venv/
 env/
 *.pyc
 __pycache__/
 
-# Временные файлы TTS
 temp_chunk_*.mp3
 temp_chunk_*.wav
 
-# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS
 .DS_Store
 Thumbs.db
 
-# Логи
 *.log
