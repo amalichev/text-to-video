@@ -245,12 +245,12 @@ def main():
     )
     parser.add_argument(
         'input_file',
-        help='Путь к текстовому файлу'
+        help='Имя текстового файла в директории src'
     )
     parser.add_argument(
         '-o', '--output',
         default='output.mp3',
-        help='Путь к выходному аудио файлу (по умолчанию: output.mp3)'
+        help='Имя выходного аудио файла в директории output (по умолчанию: output.mp3)'
     )
     parser.add_argument(
         '-e', '--engine',
@@ -277,14 +277,25 @@ def main():
 
     args = parser.parse_args()
 
+    # Определяем директории
+    SRC_DIR = Path('src')
+    OUTPUT_DIR = Path('output')
+
+    # Создаем директорию для вывода, если она не существует
+    OUTPUT_DIR.mkdir(exist_ok=True)
+
+    # Составляем полные пути
+    input_file_path = SRC_DIR / args.input_file
+    output_file_path = OUTPUT_DIR / args.output
+
     # Проверяем существование входного файла
-    if not os.path.exists(args.input_file):
-        print(f"Ошибка: файл '{args.input_file}' не найден")
+    if not input_file_path.exists():
+        print(f"Ошибка: файл '{input_file_path}' не найден")
         sys.exit(1)
 
     # Читаем текст
-    print(f"Читаю текст из {args.input_file}...")
-    with open(args.input_file, 'r', encoding='utf-8') as f:
+    print(f"Читаю текст из {input_file_path}...")
+    with open(input_file_path, 'r', encoding='utf-8') as f:
         text = f.read().strip()
 
     if not text:
@@ -319,13 +330,13 @@ def main():
             if not EDGE_TTS_AVAILABLE:
                 print("Ошибка: Edge TTS не установлен. Установите: pip install edge-tts")
                 sys.exit(1)
-            text_to_speech_edge(text, args.output, args.voice, args.speed)
+            text_to_speech_edge(text, output_file_path, args.voice, args.speed)
 
         elif engine == 'gtts':
             if not GTTS_AVAILABLE:
                 print("Ошибка: gTTS не установлен. Установите: pip install gTTS")
                 sys.exit(1)
-            text_to_speech_gtts(text, args.output, args.language, args.speed)
+            text_to_speech_gtts(text, output_file_path, args.language, args.speed)
 
         elif engine == 'pyttsx3':
             if not PYTTSX3_AVAILABLE:
@@ -333,14 +344,14 @@ def main():
                 sys.exit(1)
             # pyttsx3 использует разные единицы скорости (слова в минуту)
             pyttsx3_speed = int(args.speed * 150)  # базовая скорость 150
-            text_to_speech_pyttsx3(text, args.output, pyttsx3_speed)
+            text_to_speech_pyttsx3(text, output_file_path, pyttsx3_speed)
 
         elif engine == 'coqui':
             if not COQUI_AVAILABLE:
                 print("Ошибка: Coqui TTS не установлен.")
                 print("Установите: pip install TTS")
                 sys.exit(1)
-            text_to_speech_coqui(text, args.output, args.language)
+            text_to_speech_coqui(text, output_file_path, args.language)
 
         print("\n✓ Готово!")
 

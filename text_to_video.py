@@ -360,12 +360,12 @@ def main():
     )
     parser.add_argument(
         'input_file',
-        help='Путь к текстовому файлу'
+        help='Имя текстового файла в директории src'
     )
     parser.add_argument(
         '-o', '--output',
         default='output.mp4',
-        help='Путь к выходному видео файлу (по умолчанию: output.mp4)'
+        help='Имя выходного видео файла в директории output (по умолчанию: output.mp4)'
     )
     parser.add_argument(
         '-v', '--voice',
@@ -398,10 +398,22 @@ def main():
     parser.add_argument(
         '--bg-image',
         default=None,
-        help='Путь к фоновому изображению (если указан, используется вместо цвета)'
+        help='Имя фонового изображения в директории src (если указан, используется вместо цвета)'
     )
 
     args = parser.parse_args()
+
+    # Определяем директории
+    SRC_DIR = Path('src')
+    OUTPUT_DIR = Path('output')
+
+    # Создаем директорию для вывода, если она не существует
+    OUTPUT_DIR.mkdir(exist_ok=True)
+
+    # Составляем полные пути
+    input_file_path = SRC_DIR / args.input_file
+    output_video_path = OUTPUT_DIR / args.output
+    background_image_path = SRC_DIR / args.bg_image if args.bg_image else None
 
     # Проверяем зависимости
     if not MOVIEPY_AVAILABLE:
@@ -415,13 +427,13 @@ def main():
         sys.exit(1)
 
     # Проверяем входной файл
-    if not os.path.exists(args.input_file):
-        print(f"Ошибка: файл '{args.input_file}' не найден")
+    if not input_file_path.exists():
+        print(f"Ошибка: файл '{input_file_path}' не найден")
         sys.exit(1)
 
     # Читаем текст
-    print(f"Читаю текст из {args.input_file}...")
-    with open(args.input_file, 'r', encoding='utf-8') as f:
+    print(f"Читаю текст из {input_file_path}...")
+    with open(input_file_path, 'r', encoding='utf-8') as f:
         text = f.read().strip()
 
     if not text:
@@ -457,19 +469,19 @@ def main():
         create_video_with_subtitles(
             temp_audio_path,
             subtitles,
-            args.output,
+            output_video_path,
             args.width,
             args.height,
             bg_color,
-            args.bg_image
+            background_image_path
         )
 
-        print(f"\n✓ Готово! Видео сохранено: {args.output}")
+        print(f"\n✓ Готово! Видео сохранено: {output_video_path}")
 
     finally:
-        # Удаляем временное аудио
-        if os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
+            # Удаляем временное аудио
+            if os.path.exists(temp_audio_path):
+                os.remove(temp_audio_path)
 
 
 if __name__ == "__main__":
