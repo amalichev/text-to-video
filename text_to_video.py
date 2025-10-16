@@ -40,6 +40,8 @@ try:
 except ImportError:
     EDGE_TTS_AVAILABLE = False
 
+from add_yo import add_yo
+
 
 def split_text_to_sentences(text, max_words=15):
     """
@@ -192,7 +194,32 @@ async def generate_audio_with_timestamps(text, output_audio, voice='ru-RU-Dmitry
 
     print(f"Создано {len(subtitles)} синхронизированных субтитров")
 
-    return subtitles, total_duration
+    # Группируем субтитры по 12 строк
+    grouped_subtitles = []
+    group_size = 12
+    for i in range(0, len(subtitles), group_size):
+        chunk = subtitles[i:i+group_size]
+        
+        if not chunk:
+            continue
+
+        # Объединяем текст
+        full_text = "\n\n".join(sub['text'] for sub in chunk)
+        
+        # Время начала - от первого, время конца - от последнего
+        start_time = chunk[0]['start']
+        end_time = chunk[-1]['end']
+        
+        grouped_subtitles.append({
+            'text': full_text,
+            'start': start_time,
+            'end': end_time
+        })
+
+    print(f"Сгруппировано в {len(grouped_subtitles)} блоков субтитров по {group_size} строк")
+
+    return grouped_subtitles, total_duration
+
 
 
 def create_gradient_overlay(video_width, video_height, duration):
@@ -227,28 +254,29 @@ def create_gradient_overlay(video_width, video_height, duration):
 
 def create_subtitle_clip(subtitle_text, start_time, end_time, video_width=1920, video_height=1080):
     """
-    Создаёт клип с субтитрами
+    Создаёт клип с субтитрами, расположенными вверху экрана.
     """
     duration = end_time - start_time
 
+    # Уменьшаем шрифт, чтобы вместить увеличенный интервал
+    font_size = 36
+    box_height = video_height - 200  # Оставляем отступы сверху и снизу
+
     # Создаём текстовый клип
-    # Используем простой подход без caption для совместимости
-    # Используем системный шрифт macOS с полным путём
-    # Увеличиваем отступы с 200 до 300 пикселей (по 150 с каждой стороны)
     txt_clip = TextClip(
         text=subtitle_text,
-        font_size=48,
+        font_size=font_size,
         color='white',
         font='/System/Library/Fonts/Helvetica.ttc',  # Полный путь к шрифту
         stroke_color='black',
         stroke_width=2,
-        size=(video_width - 300, None),  # Больше отступы от краёв
-        method='caption',  # Используем caption для автоматического переноса строк
-        horizontal_align='center'
+        size=(video_width - 300, box_height),
+        method='caption'
     )
 
-    # Позиционируем внизу экрана
-    txt_clip = txt_clip.with_position(('center', video_height - 200))
+    # Позиционируем вверху экрана с отступом
+    top_margin = 100
+    txt_clip = txt_clip.with_position(('center', top_margin))
     txt_clip = txt_clip.with_start(start_time)
     txt_clip = txt_clip.with_duration(duration)
 
@@ -435,6 +463,10 @@ def main():
     print(f"Читаю текст из {input_file_path}...")
     with open(input_file_path, 'r', encoding='utf-8') as f:
         text = f.read().strip()
+
+    # Расставляем букву ё
+    print("Расставляю букву ё...")
+    text = add_yo(text)
 
     if not text:
         print("Ошибка: файл пустой")
