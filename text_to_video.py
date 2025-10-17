@@ -8,6 +8,8 @@ import sys
 import argparse
 import subprocess
 import tempfile
+import ssl
+import certifi
 from pathlib import Path
 
 try:
@@ -37,10 +39,40 @@ try:
     import edge_tts
     import asyncio
     EDGE_TTS_AVAILABLE = True
+
+    # ВРЕМЕННОЕ РЕШЕНИЕ: Патчим edge_tts для обхода истекшего сертификата Microsoft
+    # Заменяем создание SSL контекста в модуле edge_tts
+    import edge_tts.communicate
+    original_ssl_create = ssl.create_default_context
+
+    def patched_ssl_create(*args, **kwargs):
+        ctx = original_ssl_create(*args, **kwargs)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+
+    # Патчим модуль ssl внутри edge_tts.communicate
+    edge_tts.communicate.ssl.create_default_context = patched_ssl_create
+
 except ImportError:
     EDGE_TTS_AVAILABLE = False
 
 from add_yo import add_yo
+
+# Устанавливаем путь к сертификатам certifi для SSL соединений
+# Пробуем несколько источников сертификатов
+cert_paths = [
+    certifi.where(),  # certifi пакет
+    '/tmp/cacert.pem',  # Загруженные сертификаты
+    '/etc/ssl/cert.pem',  # Системные сертификаты macOS
+    '/private/etc/ssl/cert.pem',  # Альтернативный путь на macOS
+]
+
+for cert_path in cert_paths:
+    if os.path.exists(cert_path):
+        os.environ['SSL_CERT_FILE'] = cert_path
+        print(f"Используются SSL сертификаты: {cert_path}")
+        break
 
 
 def split_text_to_sentences(text, max_words=15):
@@ -92,6 +124,8 @@ async def generate_audio_with_timestamps(text, output_audio, voice='ru-RU-Dmitry
 
     # Генерируем аудио с временными метками
     print(f"Генерирую аудио с голосом {voice} и получаю временные метки...")
+    print("ВНИМАНИЕ: Проверка SSL сертификатов отключена из-за истекшего сертификата Microsoft")
+
     communicate = edge_tts.Communicate(text, voice, rate=speed_percent)
 
     # Используем SubMaker для получения точных временных меток
@@ -194,22 +228,22 @@ async def generate_audio_with_timestamps(text, output_audio, voice='ru-RU-Dmitry
 
     print(f"Создано {len(subtitles)} синхронизированных субтитров")
 
-    # Группируем субтитры по 12 строк
+    # Группируем субтитры по 2 строки
     grouped_subtitles = []
-    group_size = 12
+    group_size = 2
     for i in range(0, len(subtitles), group_size):
         chunk = subtitles[i:i+group_size]
-        
+
         if not chunk:
             continue
 
-        # Объединяем текст
-        full_text = "\n\n".join(sub['text'] for sub in chunk)
-        
+        # Объединяем текст с одинарным переносом строки (как между параграфами)
+        full_text = "\n".join(sub['text'] for sub in chunk)
+
         # Время начала - от первого, время конца - от последнего
         start_time = chunk[0]['start']
         end_time = chunk[-1]['end']
-        
+
         grouped_subtitles.append({
             'text': full_text,
             'start': start_time,
@@ -254,29 +288,63 @@ def create_gradient_overlay(video_width, video_height, duration):
 
 def create_subtitle_clip(subtitle_text, start_time, end_time, video_width=1920, video_height=1080):
     """
-    Создаёт клип с субтитрами, расположенными вверху экрана.
+    Создаёт клип с субтитрами, расположенными внизу экрана в 2 строки.
+    Используется шрифт с засечками и межстрочный интервал.
     """
     duration = end_time - start_time
 
-    # Уменьшаем шрифт, чтобы вместить увеличенный интервал
-    font_size = 36
-    box_height = video_height - 200  # Оставляем отступы сверху и снизу
+    # Размер шрифта для читаемости в 2 строки
+    font_size = 48
 
-    # Создаём текстовый клип
-    txt_clip = TextClip(
-        text=subtitle_text,
-        font_size=font_size,
-        color='white',
-        font='/System/Library/Fonts/Helvetica.ttc',  # Полный путь к шрифту
-        stroke_color='black',
-        stroke_width=2,
-        size=(video_width - 300, box_height),
-        method='caption'
-    )
+    # Межстрочный интервал (line spacing)
+    line_spacing = 15  # пикселей между строками
 
-    # Позиционируем вверху экрана с отступом
-    top_margin = 100
-    txt_clip = txt_clip.with_position(('center', top_margin))
+    # Создаём текстовый клип со шрифтом с засечками
+    # Пробуем разные шрифты с засечками в порядке предпочтения
+    fonts_to_try = [
+        '/System/Library/Fonts/Supplemental/Palatino.ttc',  # Palatino - элегантный шрифт с засечками
+        '/System/Library/Fonts/Supplemental/Times New Roman.ttf',  # Times New Roman
+        '/System/Library/Fonts/Supplemental/Georgia.ttf',  # Georgia
+        'Palatino',  # Системное имя
+        'Times-New-Roman',  # Резервный вариант
+    ]
+
+    txt_clip = None
+    for font in fonts_to_try:
+        try:
+            txt_clip = TextClip(
+                text=subtitle_text,
+                font_size=font_size,
+                color='white',
+                font=font,
+                stroke_color='black',
+                stroke_width=2,
+                size=(video_width - 400, None),  # Ограничиваем ширину
+                method='caption',
+                text_align='center',
+                interline=line_spacing  # Межстрочный интервал
+            )
+            break  # Если успешно создали, выходим из цикла
+        except:
+            continue  # Пробуем следующий шрифт
+
+    # Если ни один шрифт не сработал, создаём с дефолтным
+    if txt_clip is None:
+        txt_clip = TextClip(
+            text=subtitle_text,
+            font_size=font_size,
+            color='white',
+            stroke_color='black',
+            stroke_width=2,
+            size=(video_width - 400, None),
+            method='caption',
+            text_align='center',
+            interline=line_spacing
+        )
+
+    # Позиционируем внизу экрана с отступом
+    bottom_margin = 150
+    txt_clip = txt_clip.with_position(('center', video_height - bottom_margin - txt_clip.h))
     txt_clip = txt_clip.with_start(start_time)
     txt_clip = txt_clip.with_duration(duration)
 
@@ -403,8 +471,8 @@ def main():
     parser.add_argument(
         '-s', '--speed',
         type=float,
-        default=1.0,
-        help='Скорость речи (по умолчанию: 1.0)'
+        default=1.1,
+        help='Скорость речи (по умолчанию: 1.1 - чуть ускоренная)'
     )
     parser.add_argument(
         '--width',

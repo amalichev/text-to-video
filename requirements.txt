@@ -19,6 +19,9 @@ pydub>=0.25.1
 # Для создания видео с субтитрами
 moviepy>=2.0.0
 
+# SSL сертификаты для безопасных соединений
+certifi>=2024.0.0
+
 # Опционально: для работы pydub с MP3 и для видео
 # На Mac: brew install ffmpeg
 # На Ubuntu: sudo apt-get install ffmpeg
