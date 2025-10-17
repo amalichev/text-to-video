@@ -75,7 +75,7 @@ for cert_path in cert_paths:
         break
 
 
-def split_text_to_sentences(text, max_words=15):
+def split_text_to_sentences(text, max_words=10):
     """
     Разбивает текст на предложения для субтитров.
     Старается не превышать max_words слов в одном субтитре.
@@ -189,10 +189,10 @@ async def generate_audio_with_timestamps(text, output_audio, voice='ru-RU-Dmitry
         sentence_end = timing['end']
         sentence_duration = sentence_end - sentence_start
 
-        # Разбиваем длинное предложение на части по 10-15 слов
+        # Разбиваем длинное предложение на части по 8-10 слов
         words = sentence_text.split()
 
-        if len(words) <= 15:
+        if len(words) <= 10:
             # Если предложение короткое, используем как есть
             subtitles.append({
                 'text': sentence_text,
@@ -201,7 +201,7 @@ async def generate_audio_with_timestamps(text, output_audio, voice='ru-RU-Dmitry
             })
         else:
             # Разбиваем на части
-            max_words_per_part = 15
+            max_words_per_part = 10
             num_parts = (len(words) + max_words_per_part - 1) // max_words_per_part
             words_per_part = len(words) / num_parts
 
@@ -322,7 +322,13 @@ def create_poster(background_image, title_text, output_path, video_width=1920, v
 
     # Конвертируем в PIL Image для рисования текста
     pil_image = Image.fromarray(background_array.astype('uint8'))
-    draw = ImageDraw.Draw(pil_image)
+
+    # Конвертируем в RGBA для поддержки прозрачности
+    pil_image = pil_image.convert('RGBA')
+
+    # Создаём отдельный слой для подложки с прозрачностью
+    overlay = Image.new('RGBA', pil_image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
 
     # Пробуем загрузить шрифты с засечками (как в видео)
     fonts_to_try = [
@@ -347,15 +353,15 @@ def create_poster(background_image, title_text, output_path, video_width=1920, v
         font = ImageFont.load_default()
 
     # Отступы от краёв
-    margin_left = 80
-    margin_bottom = 80
-    padding = 20  # Отступ текста от краёв подложки
+    margin_left = 120
+    margin_bottom = 120
+    padding = 40  # Отступ текста от краёв подложки
 
     # Разбиваем текст на строки для многострочного отображения
     words = title_text.split()
     lines = []
     current_line = []
-    max_line_width = int(video_width * 0.7)  # Максимум 70% ширины экрана
+    max_line_width = int(video_width * 0.6)  # Максимум 60% ширины экрана для лучших отступов
 
     for word in words:
         test_line = ' '.join(current_line + [word])
@@ -401,14 +407,17 @@ def create_poster(background_image, title_text, output_path, video_width=1920, v
     box_x = margin_left
     box_y = video_height - box_height - margin_bottom
 
-    # Рисуем белую подложку
+    # Сдвиг подложки вниз (текст остаётся на месте)
+    box_shift_down = 10
+
+    # Рисуем белую подложку с прозрачностью 85% (alpha = 200), сдвинутую вниз
     draw.rectangle(
-        [box_x, box_y, box_x + box_width, box_y + box_height],
-        fill='white'
+        [box_x, box_y + box_shift_down, box_x + box_width, box_y + box_height + box_shift_down],
+        fill=(255, 255, 255, 200)  # Белый цвет с прозрачностью 85%
     )
 
     # Рисуем текст построчно с выравниванием по левому краю
-    # Начинаем с padding сверху для равномерного отступа
+    # Начинаем с padding сверху для равномерного отступа (текст остаётся на исходной позиции)
     current_y = box_y + padding
 
     for i, info in enumerate(line_info):
@@ -421,6 +430,12 @@ def create_poster(background_image, title_text, output_path, video_width=1920, v
 
         # Переход на следующую строку
         current_y += single_line_height + line_spacing
+
+    # Объединяем фон с полупрозрачным оверлеем
+    pil_image = Image.alpha_composite(pil_image, overlay)
+
+    # Конвертируем обратно в RGB для сохранения как PNG
+    pil_image = pil_image.convert('RGB')
 
     # Сохраняем как PNG
     pil_image.save(output_path, 'PNG')
@@ -461,7 +476,7 @@ def create_subtitle_clip(subtitle_text, start_time, end_time, video_width=1920, 
                 font=font,
                 stroke_color='black',
                 stroke_width=2,
-                size=(video_width - 400, None),  # Ограничиваем ширину
+                size=(video_width - 600, None),  # Ограничиваем ширину (по 300px с каждой стороны)
                 method='caption',
                 text_align='center',
                 interline=line_spacing  # Межстрочный интервал
@@ -478,14 +493,14 @@ def create_subtitle_clip(subtitle_text, start_time, end_time, video_width=1920, 
             color='white',
             stroke_color='black',
             stroke_width=2,
-            size=(video_width - 400, None),
+            size=(video_width - 600, None),  # Ограничиваем ширину (по 300px с каждой стороны)
             method='caption',
             text_align='center',
             interline=line_spacing
         )
 
     # Позиционируем внизу экрана с отступом
-    bottom_margin = 150
+    bottom_margin = 200
     txt_clip = txt_clip.with_position(('center', video_height - bottom_margin - txt_clip.h))
     txt_clip = txt_clip.with_start(start_time)
     txt_clip = txt_clip.with_duration(duration)
