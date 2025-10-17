@@ -286,6 +286,148 @@ def create_gradient_overlay(video_width, video_height, duration):
     return gradient_clip
 
 
+def create_poster(background_image, title_text, output_path, video_width=1920, video_height=1080):
+    """
+    Создаёт постер из фонового изображения с названием на белой подложке.
+    Текст располагается справа снизу с отступами от краёв.
+    """
+    print(f"Создаю постер: {output_path}...")
+
+    from moviepy import ImageClip, CompositeVideoClip
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFont
+
+    # Загружаем и масштабируем фоновое изображение
+    img_clip = ImageClip(background_image)
+
+    # Масштабируем изображение под размер
+    img_clip = img_clip.resized(height=video_height)
+
+    if img_clip.w < video_width:
+        img_clip = img_clip.resized(width=video_width)
+
+    # Обрезаем по центру если нужно
+    if img_clip.w > video_width or img_clip.h > video_height:
+        x_center = img_clip.w / 2
+        y_center = img_clip.h / 2
+        img_clip = img_clip.cropped(
+            x_center=x_center,
+            y_center=y_center,
+            width=video_width,
+            height=video_height
+        )
+
+    # Получаем изображение как numpy array
+    background_array = img_clip.get_frame(0)
+
+    # Конвертируем в PIL Image для рисования текста
+    pil_image = Image.fromarray(background_array.astype('uint8'))
+    draw = ImageDraw.Draw(pil_image)
+
+    # Пробуем загрузить шрифты с засечками (как в видео)
+    fonts_to_try = [
+        '/System/Library/Fonts/Supplemental/Palatino.ttc',
+        '/System/Library/Fonts/Supplemental/Times New Roman.ttf',
+        '/System/Library/Fonts/Supplemental/Georgia.ttf',
+    ]
+
+    font_size = 64
+    font = None
+
+    for font_path in fonts_to_try:
+        try:
+            if os.path.exists(font_path):
+                font = ImageFont.truetype(font_path, font_size)
+                break
+        except:
+            continue
+
+    # Если не нашли, используем дефолтный
+    if font is None:
+        font = ImageFont.load_default()
+
+    # Отступы от краёв
+    margin_left = 80
+    margin_bottom = 80
+    padding = 20  # Отступ текста от краёв подложки
+
+    # Разбиваем текст на строки для многострочного отображения
+    words = title_text.split()
+    lines = []
+    current_line = []
+    max_line_width = int(video_width * 0.7)  # Максимум 70% ширины экрана
+
+    for word in words:
+        test_line = ' '.join(current_line + [word])
+        bbox = draw.textbbox((0, 0), test_line, font=font)
+        line_width = bbox[2] - bbox[0]
+
+        if line_width <= max_line_width:
+            current_line.append(word)
+        else:
+            if current_line:
+                lines.append(' '.join(current_line))
+            current_line = [word]
+
+    if current_line:
+        lines.append(' '.join(current_line))
+
+    # Вычисляем размеры текстового блока
+    line_info = []
+    max_text_width = 0
+
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line, font=font)
+        line_width = bbox[2] - bbox[0]
+        # Используем getbbox для получения точной высоты текста с учётом baseline
+        line_info.append({
+            'text': line,
+            'width': line_width,
+            'bbox': bbox
+        })
+        max_text_width = max(max_text_width, line_width)
+
+    # Используем font_size для межстрочного интервала (более надёжно)
+    line_spacing = 10
+    # Вычисляем общую высоту на основе размера шрифта
+    single_line_height = font_size
+    total_text_height = single_line_height * len(lines) + line_spacing * (len(lines) - 1)
+
+    # Размеры белой подложки
+    box_width = max_text_width + padding * 2
+    box_height = total_text_height + padding * 2
+
+    # Позиция подложки (слева снизу с отступами)
+    box_x = margin_left
+    box_y = video_height - box_height - margin_bottom
+
+    # Рисуем белую подложку
+    draw.rectangle(
+        [box_x, box_y, box_x + box_width, box_y + box_height],
+        fill='white'
+    )
+
+    # Рисуем текст построчно с выравниванием по левому краю
+    # Начинаем с padding сверху для равномерного отступа
+    current_y = box_y + padding
+
+    for i, info in enumerate(line_info):
+        # Выравниваем по левому краю относительно подложки
+        text_x = box_x + padding
+        text_y = current_y
+
+        # Рисуем текст чёрным цветом
+        draw.text((text_x, text_y), info['text'], fill='black', font=font)
+
+        # Переход на следующую строку
+        current_y += single_line_height + line_spacing
+
+    # Сохраняем как PNG
+    pil_image.save(output_path, 'PNG')
+
+    print(f"✓ Постер создан: {output_path}")
+
+
 def create_subtitle_clip(subtitle_text, start_time, end_time, video_width=1920, video_height=1080):
     """
     Создаёт клип с субтитрами, расположенными внизу экрана в 2 строки.
@@ -530,17 +672,35 @@ def main():
     # Читаем текст
     print(f"Читаю текст из {input_file_path}...")
     with open(input_file_path, 'r', encoding='utf-8') as f:
-        text = f.read().strip()
+        content = f.read().strip()
 
-    # Расставляем букву ё
-    print("Расставляю букву ё...")
-    text = add_yo(text)
-
-    if not text:
+    if not content:
         print("Ошибка: файл пустой")
         sys.exit(1)
 
-    print(f"Длина текста: {len(text)} символов")
+    # Разделяем на заголовок (первая строка) и текст (остальное)
+    lines = content.split('\n', 1)
+
+    if len(lines) < 2:
+        print("Ошибка: файл должен содержать минимум 2 строки:")
+        print("  - Первая строка: заголовок для постера")
+        print("  - Остальные строки: текст для аудио и субтитров")
+        sys.exit(1)
+
+    title = lines[0].strip()
+    text = lines[1].strip()
+
+    if not text:
+        print("Ошибка: текст для озвучки пустой (начиная со второй строки)")
+        sys.exit(1)
+
+    print(f"Заголовок: {title}")
+    print(f"Длина текста для озвучки: {len(text)} символов")
+
+    # Расставляем букву ё
+    print("Расставляю букву ё...")
+    title = add_yo(title)
+    text = add_yo(text)
 
     # Парсим цвет фона
     bg_color = tuple(int(x) for x in args.bg_color.split(','))
@@ -577,6 +737,25 @@ def main():
         )
 
         print(f"\n✓ Готово! Видео сохранено: {output_video_path}")
+
+        # Создаём постер (если есть фоновое изображение)
+        if background_image_path and os.path.exists(background_image_path):
+            print("\n=== Создание постера ===")
+
+            # Формируем путь для постера (такое же имя как видео, но .png)
+            poster_filename = Path(args.output).stem + '.png'
+            poster_path = OUTPUT_DIR / poster_filename
+
+            # Используем заголовок из первой строки файла для текста на постере
+            create_poster(
+                background_image_path,
+                title,
+                poster_path,
+                args.width,
+                args.height
+            )
+
+            print(f"\n✓ Постер сохранён: {poster_path}")
 
     finally:
             # Удаляем временное аудио
