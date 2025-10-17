@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Скрипт для автоматической генерации видео с аудио и субтитрами
-# Использование: ./generate_video.sh audiobook-1
+# Скрипт для автоматической генерации видео с аудио или только аудио
+# Использование: ./generate_video.sh audiobook-1 [--audio-only]
 
 set -e  # Остановка при ошибке
 
@@ -37,22 +37,29 @@ if [ $# -eq 0 ]; then
     print_error "Не указано имя файла!"
     echo ""
     echo "Использование:"
-    echo "  ./generate_video.sh <базовое_имя_файла>"
+    echo "  ./generate_video.sh <базовое_имя_файла> [--audio-only]"
     echo ""
-    echo "Пример:"
-    echo "  ./generate_video.sh audiobook-1"
+    echo "Примеры:"
+    echo "  ./generate_video.sh audiobook-1              # создать видео"
+    echo "  ./generate_video.sh audiobook-1 --audio-only # создать только аудио"
     echo ""
     echo "Скрипт ищет файлы в директории 'src/':"
     echo "  - <имя>.txt  - текст для озвучки"
-    echo "  - <имя>.png или <имя>.jpg - фоновое изображение (опционально)"
+    echo "  - <имя>.png или <имя>.jpg - фоновое изображение (опционально, только для видео)"
     echo ""
-    echo "Видео будет сохранено в 'output/'"
+    echo "Результат будет сохранён в 'output/'"
     echo ""
     exit 1
 fi
 
 # Базовое имя файла
 BASE_NAME="$1"
+
+# Проверка флага audio-only
+AUDIO_ONLY=false
+if [ "$2" == "--audio-only" ]; then
+    AUDIO_ONLY=true
+fi
 
 # Определяем директории
 SRC_DIR="src"
@@ -61,17 +68,26 @@ OUTPUT_DIR="output"
 # Определяем имена и пути к файлам
 TEXT_FILE_NAME="${BASE_NAME}.txt"
 TEXT_FILE_PATH="${SRC_DIR}/${TEXT_FILE_NAME}"
-OUTPUT_VIDEO_NAME="${BASE_NAME}.mp4"
-OUTPUT_VIDEO_PATH="${OUTPUT_DIR}/${OUTPUT_VIDEO_NAME}"
 
-# Ищем изображение (PNG или JPG)
+# Устанавливаем имя выходного файла в зависимости от режима
+if [ "$AUDIO_ONLY" = true ]; then
+    OUTPUT_FILE_NAME="${BASE_NAME}.mp3"
+    OUTPUT_FILE_PATH="${OUTPUT_DIR}/${OUTPUT_FILE_NAME}"
+else
+    OUTPUT_FILE_NAME="${BASE_NAME}.mp4"
+    OUTPUT_FILE_PATH="${OUTPUT_DIR}/${OUTPUT_FILE_NAME}"
+fi
+
+# Ищем изображение (PNG или JPG) - только для видео режима
 IMAGE_FILE_NAME=""
-if [ -f "${SRC_DIR}/${BASE_NAME}.png" ]; then
-    IMAGE_FILE_NAME="${BASE_NAME}.png"
-elif [ -f "${SRC_DIR}/${BASE_NAME}.jpg" ]; then
-    IMAGE_FILE_NAME="${BASE_NAME}.jpg"
-elif [ -f "${SRC_DIR}/${BASE_NAME}.jpeg" ]; then
-    IMAGE_FILE_NAME="${BASE_NAME}.jpeg"
+if [ "$AUDIO_ONLY" = false ]; then
+    if [ -f "${SRC_DIR}/${BASE_NAME}.png" ]; then
+        IMAGE_FILE_NAME="${BASE_NAME}.png"
+    elif [ -f "${SRC_DIR}/${BASE_NAME}.jpg" ]; then
+        IMAGE_FILE_NAME="${BASE_NAME}.jpg"
+    elif [ -f "${SRC_DIR}/${BASE_NAME}.jpeg" ]; then
+        IMAGE_FILE_NAME="${BASE_NAME}.jpeg"
+    fi
 fi
 
 # Проверка существования текстового файла
@@ -82,11 +98,18 @@ fi
 
 print_success "Найден текстовый файл: $TEXT_FILE_PATH"
 
-# Информация об изображении
-if [ -n "$IMAGE_FILE_NAME" ]; then
-    print_success "Найдено фоновое изображение: ${SRC_DIR}/${IMAGE_FILE_NAME}"
+# Показываем режим работы
+if [ "$AUDIO_ONLY" = true ]; then
+    print_info "Режим: создание только аудио"
 else
-    print_warning "Фоновое изображение не найдено, будет использован тёмный фон"
+    print_info "Режим: создание видео"
+
+    # Информация об изображении
+    if [ -n "$IMAGE_FILE_NAME" ]; then
+        print_success "Найдено фоновое изображение: ${SRC_DIR}/${IMAGE_FILE_NAME}"
+    else
+        print_warning "Фоновое изображение не найдено, будет использован тёмный фон"
+    fi
 fi
 
 # Проверка виртуального окружения
@@ -100,11 +123,13 @@ fi
 print_info "Активирую виртуальное окружение..."
 source venv/bin/activate
 
-# Проверка установки зависимостей
-if ! python3 -c "import moviepy" 2>/dev/null; then
-    print_error "Библиотека moviepy не установлена!"
-    print_info "Установите зависимости: pip install -r requirements.txt"
-    exit 1
+# Проверка установки зависимостей - moviepy только для видео режима
+if [ "$AUDIO_ONLY" = false ]; then
+    if ! python3 -c "import moviepy" 2>/dev/null; then
+        print_error "Библиотека moviepy не установлена!"
+        print_info "Установите зависимости: pip install -r requirements.txt"
+        exit 1
+    fi
 fi
 
 # Настройки по умолчанию (можно изменить)
@@ -117,8 +142,10 @@ BG_COLOR="20,20,30"          # Тёмно-синий фон
 print_info "Параметры генерации:"
 echo "  Голос: $VOICE"
 echo "  Скорость: ${SPEED}x"
-echo "  Разрешение: ${WIDTH}x${HEIGHT}"
-echo "  Выходной файл: $OUTPUT_VIDEO_PATH"
+if [ "$AUDIO_ONLY" = false ]; then
+    echo "  Разрешение: ${WIDTH}x${HEIGHT}"
+fi
+echo "  Выходной файл: $OUTPUT_FILE_PATH"
 echo ""
 
 # Применяем замену "е" на "ё" перед генерацией аудио
@@ -131,31 +158,46 @@ fi
 echo ""
 
 # Формируем команду
-CMD="python3 text_to_video.py \"$TEXT_FILE_NAME\" -o \"$OUTPUT_VIDEO_NAME\" -v \"$VOICE\" -s $SPEED --width $WIDTH --height $HEIGHT --bg-color \"$BG_COLOR\""
+CMD="python3 text_to_video.py \"$TEXT_FILE_NAME\" -o \"$OUTPUT_FILE_NAME\" -v \"$VOICE\" -s $SPEED"
 
-# Добавляем изображение если есть
-if [ -n "$IMAGE_FILE_NAME" ]; then
-    CMD="$CMD --bg-image \"$IMAGE_FILE_NAME\""
+# Добавляем параметры в зависимости от режима
+if [ "$AUDIO_ONLY" = true ]; then
+    CMD="$CMD --audio-only"
+else
+    CMD="$CMD --width $WIDTH --height $HEIGHT --bg-color \"$BG_COLOR\""
+
+    # Добавляем изображение если есть
+    if [ -n "$IMAGE_FILE_NAME" ]; then
+        CMD="$CMD --bg-image \"$IMAGE_FILE_NAME\""
+    fi
 fi
 
-print_info "Запускаю генерацию видео..."
+if [ "$AUDIO_ONLY" = true ]; then
+    print_info "Запускаю генерацию аудио..."
+else
+    print_info "Запускаю генерацию видео..."
+fi
 echo ""
 
 # Запуск генерации
 eval $CMD
 
 # Проверка результата
-if [ -f "$OUTPUT_VIDEO_PATH" ]; then
+if [ -f "$OUTPUT_FILE_PATH" ]; then
     echo ""
-    print_success "Видео успешно создано: $OUTPUT_VIDEO_PATH"
+    if [ "$AUDIO_ONLY" = true ]; then
+        print_success "Аудио успешно создано: $OUTPUT_FILE_PATH"
+    else
+        print_success "Видео успешно создано: $OUTPUT_FILE_PATH"
+    fi
 
     # Показываем информацию о файле
-    FILE_SIZE=$(ls -lh "$OUTPUT_VIDEO_PATH" | awk '{print $5}')
+    FILE_SIZE=$(ls -lh "$OUTPUT_FILE_PATH" | awk '{print $5}')
     print_info "Размер файла: $FILE_SIZE"
 
     # Получаем длительность с помощью ffprobe если доступен
     if command -v ffprobe &> /dev/null; then
-        DURATION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$OUTPUT_VIDEO_PATH" 2>/dev/null || echo "неизвестно")
+        DURATION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$OUTPUT_FILE_PATH" 2>/dev/null || echo "неизвестно")
         if [ "$DURATION" != "неизвестно" ]; then
             # Преобразуем секунды в минуты:секунды
             MINUTES=$(echo "$DURATION / 60" | bc)
@@ -167,6 +209,10 @@ if [ -f "$OUTPUT_VIDEO_PATH" ]; then
     echo ""
     print_success "Готово! 🎉"
 else
-    print_error "Не удалось создать видео! Проверьте лог ошибок выше."
+    if [ "$AUDIO_ONLY" = true ]; then
+        print_error "Не удалось создать аудио! Проверьте лог ошибок выше."
+    else
+        print_error "Не удалось создать видео! Проверьте лог ошибок выше."
+    fi
     exit 1
 fi

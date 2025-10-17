@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Скрипт для создания видео с аудио и синхронизированными субтитрами
+Скрипт для создания видео с аудио
 """
 
 import os
@@ -111,9 +111,9 @@ def split_text_to_sentences(text, max_words=10):
     return result
 
 
-async def generate_audio_with_timestamps(text, output_audio, voice='ru-RU-DmitryNeural', speed=1.0):
+async def generate_audio(text, output_audio, voice='ru-RU-DmitryNeural', speed=1.0):
     """
-    Генерирует аудио и возвращает метки времени с синхронизацией по предложениям
+    Генерирует аудио и возвращает длительность
     """
     # Преобразуем скорость в процент для Edge TTS
     speed_change = int((speed - 1.0) * 100)
@@ -122,137 +122,24 @@ async def generate_audio_with_timestamps(text, output_audio, voice='ru-RU-Dmitry
     else:
         speed_percent = f"{speed_change}%"
 
-    # Генерируем аудио с временными метками
-    print(f"Генерирую аудио с голосом {voice} и получаю временные метки...")
+    # Генерируем аудио
+    print(f"Генерирую аудио с голосом {voice}...")
     print("ВНИМАНИЕ: Проверка SSL сертификатов отключена из-за истекшего сертификата Microsoft")
 
     communicate = edge_tts.Communicate(text, voice, rate=speed_percent)
 
-    # Используем SubMaker для получения точных временных меток
-    submaker = edge_tts.SubMaker()
-
-    # Сохраняем аудио и собираем метки времени
+    # Сохраняем аудио
     with open(output_audio, 'wb') as audio_file:
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 audio_file.write(chunk["data"])
-            elif chunk["type"] in ("WordBoundary", "SentenceBoundary"):
-                submaker.feed(chunk)
-
-    # Получаем SRT субтитры и парсим их
-    srt_content = submaker.get_srt()
-
-    # Парсим SRT для получения временных меток
-    # Формат SRT:
-    # 1
-    # 00:00:00,000 --> 00:00:01,000
-    # Текст субтитра
-    import re
-    srt_pattern = r'(\d+)\n([\d:,]+) --> ([\d:,]+)\n(.+?)(?=\n\n|\Z)'
-    matches = re.findall(srt_pattern, srt_content, re.DOTALL)
-
-    # Конвертируем временные метки из "HH:MM:SS,mmm" в секунды
-    def time_to_seconds(time_str):
-        parts = time_str.replace(',', ':').split(':')
-        hours, minutes, seconds, milliseconds = map(int, parts)
-        return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000.0
-
-    sentence_timings = []
-    for match in matches:
-        start_str = match[1]
-        end_str = match[2]
-        sentence_text = match[3].strip()
-
-        start_time = time_to_seconds(start_str)
-        end_time = time_to_seconds(end_str)
-
-        sentence_timings.append({
-            'text': sentence_text,
-            'start': start_time,
-            'end': end_time
-        })
-
-    print(f"Получено {len(sentence_timings)} временных меток предложений")
 
     # Получаем длительность аудио
     temp_audio_clip = AudioFileClip(output_audio)
     total_duration = temp_audio_clip.duration
     temp_audio_clip.close()
 
-    # Теперь разбиваем длинные предложения на части для отображения
-    # и сопоставляем их с временными метками
-    subtitles = []
-
-    for timing in sentence_timings:
-        sentence_text = timing['text']
-        sentence_start = timing['start']
-        sentence_end = timing['end']
-        sentence_duration = sentence_end - sentence_start
-
-        # Разбиваем длинное предложение на части по 8-10 слов
-        words = sentence_text.split()
-
-        if len(words) <= 10:
-            # Если предложение короткое, используем как есть
-            subtitles.append({
-                'text': sentence_text,
-                'start': sentence_start,
-                'end': sentence_end
-            })
-        else:
-            # Разбиваем на части
-            max_words_per_part = 10
-            num_parts = (len(words) + max_words_per_part - 1) // max_words_per_part
-            words_per_part = len(words) / num_parts
-
-            current_pos = 0
-            for part_idx in range(num_parts):
-                # Определяем слова для этой части
-                start_word_idx = int(current_pos)
-                end_word_idx = min(int(current_pos + words_per_part), len(words))
-
-                part_words = words[start_word_idx:end_word_idx]
-                part_text = ' '.join(part_words)
-
-                # Распределяем время пропорционально количеству слов
-                part_start = sentence_start + (start_word_idx / len(words)) * sentence_duration
-                part_end = sentence_start + (end_word_idx / len(words)) * sentence_duration
-
-                subtitles.append({
-                    'text': part_text,
-                    'start': part_start,
-                    'end': part_end
-                })
-
-                current_pos += words_per_part
-
-    print(f"Создано {len(subtitles)} синхронизированных субтитров")
-
-    # Группируем субтитры по 2 строки
-    grouped_subtitles = []
-    group_size = 2
-    for i in range(0, len(subtitles), group_size):
-        chunk = subtitles[i:i+group_size]
-
-        if not chunk:
-            continue
-
-        # Объединяем текст с одинарным переносом строки (как между параграфами)
-        full_text = "\n".join(sub['text'] for sub in chunk)
-
-        # Время начала - от первого, время конца - от последнего
-        start_time = chunk[0]['start']
-        end_time = chunk[-1]['end']
-
-        grouped_subtitles.append({
-            'text': full_text,
-            'start': start_time,
-            'end': end_time
-        })
-
-    print(f"Сгруппировано в {len(grouped_subtitles)} блоков субтитров по {group_size} строк")
-
-    return grouped_subtitles, total_duration
+    return total_duration
 
 
 
@@ -474,8 +361,6 @@ def create_subtitle_clip(subtitle_text, start_time, end_time, video_width=1920, 
                 font_size=font_size,
                 color='white',
                 font=font,
-                stroke_color='black',
-                stroke_width=2,
                 size=(video_width - 600, None),  # Ограничиваем ширину (по 300px с каждой стороны)
                 method='caption',
                 text_align='center',
@@ -491,8 +376,6 @@ def create_subtitle_clip(subtitle_text, start_time, end_time, video_width=1920, 
             text=subtitle_text,
             font_size=font_size,
             color='white',
-            stroke_color='black',
-            stroke_width=2,
             size=(video_width - 600, None),  # Ограничиваем ширину (по 300px с каждой стороны)
             method='caption',
             text_align='center',
@@ -508,14 +391,14 @@ def create_subtitle_clip(subtitle_text, start_time, end_time, video_width=1920, 
     return txt_clip
 
 
-def create_video_with_subtitles(audio_file, subtitles, output_video,
-                                 video_width=1920, video_height=1080,
-                                 background_color=(20, 20, 30),
-                                 background_image=None):
+def create_video(audio_file, output_video,
+                 video_width=1920, video_height=1080,
+                 background_color=(20, 20, 30),
+                 background_image=None):
     """
-    Создаёт видео с фоном (цвет или картинка) и субтитрами
+    Создаёт видео с фоном (цвет или картинка) без субтитров
     """
-    print("Создаю видео с субтитрами...")
+    print("Создаю видео...")
 
     # Загружаем аудио
     audio_clip = AudioFileClip(audio_file)
@@ -566,24 +449,11 @@ def create_video_with_subtitles(audio_file, subtitles, output_video,
         )
         gradient_overlay = None
 
-    # Создаём клипы для каждого субтитра
-    subtitle_clips = []
-    for i, sub in enumerate(subtitles):
-        print(f"  Создаю субтитр {i+1}/{len(subtitles)}: {sub['start']:.1f}s - {sub['end']:.1f}s")
-        txt_clip = create_subtitle_clip(
-            sub['text'],
-            sub['start'],
-            sub['end'],
-            video_width,
-            video_height
-        )
-        subtitle_clips.append(txt_clip)
-
-    # Накладываем градиент и субтитры на фон
+    # Создаём композицию видео
     if gradient_overlay is not None:
-        video = CompositeVideoClip([background, gradient_overlay] + subtitle_clips)
+        video = CompositeVideoClip([background, gradient_overlay])
     else:
-        video = CompositeVideoClip([background] + subtitle_clips)
+        video = background
 
     # Добавляем аудио
     video = video.with_audio(audio_clip)
@@ -609,7 +479,7 @@ def create_video_with_subtitles(audio_file, subtitles, output_video,
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Создание видео с аудио и синхронизированными субтитрами'
+        description='Создание видео с аудио'
     )
     parser.add_argument(
         'input_file',
@@ -653,6 +523,11 @@ def main():
         default=None,
         help='Имя фонового изображения в директории src (если указан, используется вместо цвета)'
     )
+    parser.add_argument(
+        '--audio-only',
+        action='store_true',
+        help='Создать только аудио файл без видео (формат .mp3)'
+    )
 
     args = parser.parse_args()
 
@@ -665,11 +540,17 @@ def main():
 
     # Составляем полные пути
     input_file_path = SRC_DIR / args.input_file
-    output_video_path = OUTPUT_DIR / args.output
+
+    # Если режим audio-only, меняем расширение на .mp3
+    if args.audio_only:
+        output_path = OUTPUT_DIR / Path(args.output).with_suffix('.mp3').name
+    else:
+        output_path = OUTPUT_DIR / args.output
+
     background_image_path = SRC_DIR / args.bg_image if args.bg_image else None
 
     # Проверяем зависимости
-    if not MOVIEPY_AVAILABLE:
+    if not args.audio_only and not MOVIEPY_AVAILABLE:
         print("Ошибка: moviepy не установлен")
         print("Установите: pip install moviepy")
         sys.exit(1)
@@ -693,89 +574,111 @@ def main():
         print("Ошибка: файл пустой")
         sys.exit(1)
 
-    # Разделяем на заголовок (первая строка) и текст (остальное)
-    lines = content.split('\n', 1)
+    # Для audio-only режима весь файл - это текст для озвучки
+    # Для видео - первая строка заголовок, остальное - текст
+    if args.audio_only:
+        title = None
+        text = content
+        print(f"Длина текста для озвучки: {len(text)} символов")
+    else:
+        # Разделяем на заголовок (первая строка) и текст (остальное)
+        lines = content.split('\n', 1)
 
-    if len(lines) < 2:
-        print("Ошибка: файл должен содержать минимум 2 строки:")
-        print("  - Первая строка: заголовок для постера")
-        print("  - Остальные строки: текст для аудио и субтитров")
-        sys.exit(1)
+        if len(lines) < 2:
+            print("Ошибка: для создания видео файл должен содержать минимум 2 строки:")
+            print("  - Первая строка: заголовок для постера")
+            print("  - Остальные строки: текст для аудио")
+            print("\nДля создания только аудио используйте флаг --audio-only")
+            sys.exit(1)
 
-    title = lines[0].strip()
-    text = lines[1].strip()
+        title = lines[0].strip()
+        text = lines[1].strip()
 
-    if not text:
-        print("Ошибка: текст для озвучки пустой (начиная со второй строки)")
-        sys.exit(1)
+        if not text:
+            print("Ошибка: текст для озвучки пустой (начиная со второй строки)")
+            sys.exit(1)
 
-    print(f"Заголовок: {title}")
-    print(f"Длина текста для озвучки: {len(text)} символов")
+        print(f"Заголовок: {title}")
+        print(f"Длина текста для озвучки: {len(text)} символов")
 
     # Расставляем букву ё
     print("Расставляю букву ё...")
-    title = add_yo(title)
+    if title:
+        title = add_yo(title)
     text = add_yo(text)
 
     # Парсим цвет фона
     bg_color = tuple(int(x) for x in args.bg_color.split(','))
 
-    # Создаём временный файл для аудио
-    with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp_audio:
-        temp_audio_path = tmp_audio.name
-
-    try:
-        # Генерируем аудио и субтитры
+    # Если режим audio-only, сохраняем аудио напрямую
+    if args.audio_only:
         print("\n=== Генерация аудио ===")
-        subtitles, duration = asyncio.run(
-            generate_audio_with_timestamps(
+        duration = asyncio.run(
+            generate_audio(
                 text,
-                temp_audio_path,
+                output_path,
                 args.voice,
                 args.speed
             )
         )
 
         print(f"\n✓ Аудио создано: {duration:.1f} секунд")
-        print(f"✓ Создано субтитров: {len(subtitles)}")
+        print(f"✓ Готово! Аудио сохранено: {output_path}")
+    else:
+        # Создаём временный файл для аудио
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp_audio:
+            temp_audio_path = tmp_audio.name
 
-        # Создаём видео
-        print("\n=== Создание видео ===")
-        create_video_with_subtitles(
-            temp_audio_path,
-            subtitles,
-            output_video_path,
-            args.width,
-            args.height,
-            bg_color,
-            background_image_path
-        )
-
-        print(f"\n✓ Готово! Видео сохранено: {output_video_path}")
-
-        # Создаём постер (если есть фоновое изображение)
-        if background_image_path and os.path.exists(background_image_path):
-            print("\n=== Создание постера ===")
-
-            # Формируем путь для постера (такое же имя как видео, но .png)
-            poster_filename = Path(args.output).stem + '.png'
-            poster_path = OUTPUT_DIR / poster_filename
-
-            # Используем заголовок из первой строки файла для текста на постере
-            create_poster(
-                background_image_path,
-                title,
-                poster_path,
-                args.width,
-                args.height
+        try:
+            # Генерируем аудио
+            print("\n=== Генерация аудио ===")
+            duration = asyncio.run(
+                generate_audio(
+                    text,
+                    temp_audio_path,
+                    args.voice,
+                    args.speed
+                )
             )
 
-            print(f"\n✓ Постер сохранён: {poster_path}")
+            print(f"\n✓ Аудио создано: {duration:.1f} секунд")
 
-    finally:
-            # Удаляем временное аудио
-            if os.path.exists(temp_audio_path):
-                os.remove(temp_audio_path)
+            # Создаём видео
+            print("\n=== Создание видео ===")
+            create_video(
+                temp_audio_path,
+                output_path,
+                args.width,
+                args.height,
+                bg_color,
+                background_image_path
+            )
+
+            print(f"\n✓ Готово! Видео сохранено: {output_path}")
+
+            # Создаём постер (если есть фоновое изображение)
+            if background_image_path and os.path.exists(background_image_path):
+                print("\n=== Создание постера ===")
+
+                # Формируем путь для постера (такое же имя как видео, но .png)
+                poster_filename = Path(args.output).stem + '.png'
+                poster_path = OUTPUT_DIR / poster_filename
+
+                # Используем заголовок из первой строки файла для текста на постере
+                create_poster(
+                    background_image_path,
+                    title,
+                    poster_path,
+                    args.width,
+                    args.height
+                )
+
+                print(f"\n✓ Постер сохранён: {poster_path}")
+
+        finally:
+                # Удаляем временное аудио
+                if os.path.exists(temp_audio_path):
+                    os.remove(temp_audio_path)
 
 
 if __name__ == "__main__":
